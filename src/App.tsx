@@ -4,6 +4,7 @@ import deckData from "./data/deck.json";
 
 type Color = "red" | "blue" | "green" | "purple" | "yellow";
 type Card = { id: number; color: Color; gem: Color };
+type ZoneId = "a" | "b";
 
 const COLOR_HEX: Record<Color, string> = {
   red: "#e74c3c",
@@ -25,14 +26,14 @@ function shuffle<T>(arr: T[]): T[] {
 function initGame() {
   const shuffled = shuffle(deckData as Card[]);
   return {
-    hand: shuffled.slice(0, 5),
-    table: shuffled.slice(5, 13),
-    deck: shuffled.slice(13),
+    a:    shuffled.slice(0, 8),
+    b:    shuffled.slice(8, 16),
+    deck: shuffled.slice(16),
   };
 }
 
 export default function App() {
-  const [{ hand, table, deck }, setGame] = useState(initGame);
+  const [{ a, b, deck }, setGame] = useState(initGame);
   const [isAnimating, setIsAnimating] = useState(false);
   const animatingIds = useRef(new Set<number>());
 
@@ -41,21 +42,32 @@ export default function App() {
     if (animatingIds.current.size === 0) setIsAnimating(false);
   }
 
-  function playCard(card: Card) {
+  function playCard(card: Card, from: ZoneId) {
     if (isAnimating) return;
 
-    const collected = table.filter((c) => c.color === card.gem);
-    const remaining = table.filter((c) => c.color !== card.gem);
+    const source = from === "a" ? a : b;
+    const target = from === "a" ? b : a;
+
+    const collected = target.filter((c) => c.color === card.gem);
+    const remaining = target.filter((c) => c.color !== card.gem);
+
+    const newSource = [...source.filter((c) => c.id !== card.id), ...collected];
+    const newTarget = [...remaining, card];
 
     animatingIds.current = new Set([card.id, ...collected.map((c) => c.id)]);
     setIsAnimating(true);
 
     setGame({
       deck,
-      hand: [...hand.filter((c) => c.id !== card.id), ...collected],
-      table: [...remaining, card],
+      a: from === "a" ? newSource : newTarget,
+      b: from === "a" ? newTarget : newSource,
     });
   }
+
+  const zones: { id: ZoneId; cards: Card[] }[] = [
+    { id: "a", cards: a },
+    { id: "b", cards: b },
+  ];
 
   return (
     <LayoutGroup>
@@ -68,62 +80,35 @@ export default function App() {
           gap: 48,
         }}
       >
-        <div>
-          <p style={{ margin: "0 0 12px", color: "#888" }}>
-            Table — {table.length} cards
-          </p>
-          <div
-            style={{
-              display: "flex",
-              flexWrap: "wrap",
-              gap: 8,
-              minHeight: 110,
-            }}
-          >
-            {table.map((card) => (
-              <motion.div
-                key={card.id}
-                layoutId={`card-${card.id}`}
-                onLayoutAnimationComplete={
-                  animatingIds.current.has(card.id)
-                    ? () => onCardAnimationComplete(card.id)
-                    : undefined
-                }
-                style={makeCardStyle(card.color)}
-              >
-                <Gem color={card.gem} />
-              </motion.div>
-            ))}
+        {zones.map(({ id, cards }) => (
+          <div key={id}>
+            <p style={{ margin: "0 0 12px", color: "#888" }}>
+              Zone {id.toUpperCase()} — {cards.length} cards
+            </p>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8, minHeight: 110 }}>
+              {cards.map((card) => (
+                <motion.div
+                  key={card.id}
+                  layoutId={`card-${card.id}`}
+                  onClick={() => playCard(card, id)}
+                  whileHover={isAnimating ? {} : { y: -10 }}
+                  onLayoutAnimationComplete={
+                    animatingIds.current.has(card.id)
+                      ? () => onCardAnimationComplete(card.id)
+                      : undefined
+                  }
+                  style={{
+                    ...makeCardStyle(card.color),
+                    cursor: isAnimating ? "not-allowed" : "pointer",
+                    opacity: isAnimating ? 0.6 : 1,
+                  }}
+                >
+                  <Gem color={card.gem} />
+                </motion.div>
+              ))}
+            </div>
           </div>
-        </div>
-
-        <div>
-          <p style={{ margin: "0 0 12px", color: "#888" }}>
-            Hand — {hand.length} cards{isAnimating ? " (animating…)" : ""}
-          </p>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-            {hand.map((card) => (
-              <motion.div
-                key={card.id}
-                layoutId={`card-${card.id}`}
-                onClick={() => playCard(card)}
-                whileHover={isAnimating ? {} : { y: -10 }}
-                onLayoutAnimationComplete={
-                  animatingIds.current.has(card.id)
-                    ? () => onCardAnimationComplete(card.id)
-                    : undefined
-                }
-                style={{
-                  ...makeCardStyle(card.color),
-                  cursor: isAnimating ? "not-allowed" : "pointer",
-                  opacity: isAnimating ? 0.6 : 1,
-                }}
-              >
-                <Gem color={card.gem} />
-              </motion.div>
-            ))}
-          </div>
-        </div>
+        ))}
       </div>
     </LayoutGroup>
   );

@@ -1,11 +1,11 @@
 import { useRef, useState } from "react";
 import { motion, LayoutGroup } from "framer-motion";
-import deckData from "./data/deck.json";
 
 type Color = "red" | "blue" | "green" | "purple" | "yellow";
-type Card = { id: number; color: Color; gem: Color };
 type ZoneId = "a" | "b";
+type Die = { id: number; color: Color; value: number };
 
+const COLORS: Color[] = ["red", "blue", "green", "purple", "yellow"];
 const COLOR_HEX: Record<Color, string> = {
   red: "#e74c3c",
   blue: "#3498db",
@@ -14,59 +14,63 @@ const COLOR_HEX: Record<Color, string> = {
   yellow: "#f1c40f",
 };
 
-function shuffle<T>(arr: T[]): T[] {
-  const a = [...arr];
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]];
-  }
-  return a;
-}
+let nextId = 0;
+function roll() { return Math.floor(Math.random() * 6) + 1; }
+function randomColor(): Color { return COLORS[Math.floor(Math.random() * COLORS.length)]; }
+function makeDie(): Die { return { id: nextId++, color: randomColor(), value: roll() }; }
+function reroll(die: Die): Die { return { ...die, value: roll() }; }
 
 function initGame() {
-  const shuffled = shuffle(deckData as Card[]);
   return {
-    a:    shuffled.slice(0, 8),
-    b:    shuffled.slice(8, 16),
-    deck: shuffled.slice(16),
+    a: Array.from({ length: 8 }, makeDie),
+    b: Array.from({ length: 8 }, makeDie),
   };
 }
 
+function groupByValue(dice: Die[]): [number, Die[]][] {
+  const map = new Map<number, Die[]>();
+  for (const d of dice) {
+    const g = map.get(d.value) ?? [];
+    g.push(d);
+    map.set(d.value, g);
+  }
+  return [...map.entries()].sort(([a], [b]) => a - b);
+}
+
 export default function App() {
-  const [{ a, b, deck }, setGame] = useState(initGame);
+  const [{ a, b }, setGame] = useState(initGame);
   const [isAnimating, setIsAnimating] = useState(false);
   const animatingIds = useRef(new Set<number>());
 
-  function onCardAnimationComplete(id: number) {
+  function onDieAnimationComplete(id: number) {
     animatingIds.current.delete(id);
     if (animatingIds.current.size === 0) setIsAnimating(false);
   }
 
-  function playCard(card: Card, from: ZoneId) {
+  function selectDie(die: Die, from: ZoneId) {
     if (isAnimating) return;
 
     const source = from === "a" ? a : b;
     const target = from === "a" ? b : a;
 
-    const collected = target.filter((c) => c.color === card.gem);
-    const remaining = target.filter((c) => c.color !== card.gem);
+    const matched   = target.filter((d) => d.value === die.value);
+    const remaining = target.filter((d) => d.value !== die.value);
 
-    const newSource = [...source.filter((c) => c.id !== card.id), ...collected];
-    const newTarget = [...remaining, card];
+    const newSource = [...source.filter((d) => d.id !== die.id), ...matched.map(reroll)];
+    const newTarget = [...remaining, reroll(die)];
 
-    animatingIds.current = new Set([card.id, ...collected.map((c) => c.id)]);
+    animatingIds.current = new Set([die.id, ...matched.map((d) => d.id)]);
     setIsAnimating(true);
 
     setGame({
-      deck,
       a: from === "a" ? newSource : newTarget,
       b: from === "a" ? newTarget : newSource,
     });
   }
 
-  const zones: { id: ZoneId; cards: Card[] }[] = [
-    { id: "a", cards: a },
-    { id: "b", cards: b },
+  const zones: { id: ZoneId; dice: Die[] }[] = [
+    { id: "a", dice: a },
+    { id: "b", dice: b },
   ];
 
   return (
@@ -80,30 +84,52 @@ export default function App() {
           gap: 48,
         }}
       >
-        {zones.map(({ id, cards }) => (
+        {zones.map(({ id, dice }) => (
           <div key={id}>
-            <p style={{ margin: "0 0 12px", color: "#888" }}>
-              Zone {id.toUpperCase()} — {cards.length} cards
+            <p style={{ margin: "0 0 16px", color: "#888" }}>
+              Zone {id.toUpperCase()} — {dice.length} dice
             </p>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 8, minHeight: 110 }}>
-              {cards.map((card) => (
+            <div style={{ display: "flex", gap: 24, flexWrap: "wrap", alignItems: "flex-end" }}>
+              {groupByValue(dice).map(([value, group]) => (
                 <motion.div
-                  key={card.id}
-                  layoutId={`card-${card.id}`}
-                  onClick={() => playCard(card, id)}
-                  whileHover={isAnimating ? {} : { y: -10 }}
-                  onLayoutAnimationComplete={
-                    animatingIds.current.has(card.id)
-                      ? () => onCardAnimationComplete(card.id)
-                      : undefined
-                  }
-                  style={{
-                    ...makeCardStyle(card.color),
-                    cursor: isAnimating ? "not-allowed" : "pointer",
-                    opacity: isAnimating ? 0.6 : 1,
-                  }}
+                  key={value}
+                  layout
+                  style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}
                 >
-                  <Gem color={card.gem} />
+                  <span style={{ color: "#aaa", fontSize: 12, fontWeight: 600 }}>{value}</span>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    {group.map((die) => (
+                      <motion.div
+                        key={die.id}
+                        layoutId={`die-${die.id}`}
+                        onClick={() => selectDie(die, id)}
+                        whileHover={isAnimating ? {} : { y: -8, scale: 1.08 }}
+                        onLayoutAnimationComplete={
+                          animatingIds.current.has(die.id)
+                            ? () => onDieAnimationComplete(die.id)
+                            : undefined
+                        }
+                        style={{
+                          width: 48,
+                          height: 48,
+                          borderRadius: 8,
+                          background: COLOR_HEX[die.color],
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          fontSize: 20,
+                          fontWeight: 700,
+                          color: "rgba(255,255,255,0.9)",
+                          cursor: isAnimating ? "not-allowed" : "pointer",
+                          opacity: isAnimating ? 0.6 : 1,
+                          userSelect: "none",
+                          boxShadow: "0 2px 6px rgba(0,0,0,0.25)",
+                        }}
+                      >
+                        {die.value}
+                      </motion.div>
+                    ))}
+                  </div>
                 </motion.div>
               ))}
             </div>
@@ -112,33 +138,4 @@ export default function App() {
       </div>
     </LayoutGroup>
   );
-}
-
-function Gem({ color }: { color: Color }) {
-  return (
-    <div
-      style={{
-        width: 20,
-        height: 20,
-        borderRadius: "50%",
-        background: COLOR_HEX[color],
-        border: "2px solid rgba(255,255,255,255.25)",
-        boxShadow: "0 1px 3px rgba(0,0,0,0.3)",
-      }}
-    />
-  );
-}
-
-function makeCardStyle(color: Color): React.CSSProperties {
-  return {
-    width: 60,
-    height: 90,
-    borderRadius: 8,
-    background: COLOR_HEX[color],
-    display: "flex",
-    alignItems: "flex-start",
-    justifyContent: "flex-start",
-    userSelect: "none",
-    boxShadow: "0 2px 6px rgba(0,0,0,0.2)",
-  };
 }
